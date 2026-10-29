@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-subtitle",
+  "description": "Permissions for the floating desktop subtitle window",
+  "windows": ["desktop-subtitle"],
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
+}

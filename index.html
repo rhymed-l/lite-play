@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>lite-play</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="error" class="error" role="alert" hidden></div>
+
+      <div class="row">
+        <select id="folder-select" aria-label="已保存的文件夹"></select>
+        <button id="add-folder" type="button">添加文件夹</button>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="列表或字幕">
+        <button id="tab-list" type="button" role="tab" aria-selected="true" aria-controls="tracks">列表</button>
+        <button id="tab-subtitles" type="button" role="tab" aria-selected="false" aria-controls="subtitle-view">字幕</button>
+      </div>
+
+      <ul id="tracks" role="tabpanel" aria-labelledby="tab-list" aria-label="播放列表"></ul>
+
+      <div id="subtitle-view" class="subtitle-view" role="tabpanel" aria-labelledby="tab-subtitles" hidden>
+        <p id="subtitle-notice" class="subtitle-notice" hidden></p>
+        <ol id="cue-list" class="cue-list" aria-label="字幕全文"></ol>
+      </div>
+
+      <div class="row">
+        <input id="seek" type="range" min="0" max="0" step="1" value="0" aria-label="播放进度" />
+        <span id="time" class="time">--:-- / --:--</span>
+      </div>
+
+      <div class="row grow">
+        <button id="prev" type="button" aria-label="上一首">上一首</button>
+        <button id="play" type="button" class="primary" aria-label="播放">播放</button>
+        <button id="next" type="button" aria-label="下一首">下一首</button>
+      </div>
+
+      <div class="row">
+        <label for="volume">音量</label>
+        <input id="volume" type="range" min="0" max="100" step="1" value="80" aria-label="音量" />
+      </div>
+
+      <div class="row">
+        <select id="mode" aria-label="播放模式">
+          <option value="Sequential">顺序播放</option>
+          <option value="Single">单曲循环</option>
+          <option value="Shuffle">随机播放</option>
+        </select>
+        <button id="direction" type="button" aria-pressed="false">倒序</button>
+        <label class="check"><input id="memory" type="checkbox" />记忆进度</label>
+      </div>
+
+      <details id="subtitle-settings" class="settings">
+        <summary>字幕设置</summary>
+        <div class="settings-body">
+          <p id="sub-unsupported" class="subtitle-notice" hidden>字幕功能目前只支持 Windows</p>
+
+          <div class="row">
+            <label class="check"><input id="sub-enabled" type="checkbox" />开启字幕（自动生成）</label>
+          </div>
+          <p id="sub-progress" class="muted"></p>
+          <p id="sub-failed" class="muted" hidden></p>
+
+          <div id="sub-install" class="row" hidden>
+            <progress id="sub-install-bar" max="100" value="0" aria-label="安装进度"></progress>
+            <span id="sub-install-label" class="muted"></span>
+            <button id="sub-install-cancel" type="button">取消</button>
+          </div>
+          <p id="sub-install-error" class="error" role="alert" hidden></p>
+
+          <div class="row">
+            <label for="sub-power">生成速度</label>
+            <select id="sub-power" aria-label="字幕生成速度">
+              <option value="light">轻量</option>
+              <option value="balanced">均衡</option>
+              <option value="full">全速</option>
+            </select>
+          </div>
+          <p id="sub-power-hint" class="muted"></p>
+
+          <div class="row">
+            <button id="sub-update" type="button" hidden>更新字幕组件</button>
+            <button id="sub-uninstall" type="button" hidden>卸载字幕组件</button>
+          </div>
+
+          <div class="row">
+            <label for="sub-font">字号</label>
+            <input id="sub-font" type="range" min="14" max="96" step="1" value="28" aria-label="字幕字号" />
+            <span id="sub-font-value" class="muted">28</span>
+          </div>
+          <div class="row">
+            <label for="sub-scheme">配色</label>
+            <select id="sub-scheme" aria-label="字幕配色">
+              <option value="dark">暗底白字</option>
+              <option value="light">亮底黑字</option>
+              <option value="yellow">黑底黄字</option>
+              <option value="custom">自定义</option>
+            </select>
+            <input id="sub-fg" type="color" value="#ffffff" aria-label="文字颜色" hidden />
+            <input id="sub-bg" type="color" value="#000000" aria-label="背景颜色" hidden />
+          </div>
+
+          <div class="row">
+            <label class="check"><input id="sub-desktop" type="checkbox" />桌面字幕</label>
+            <label class="check"><input id="sub-locked" type="checkbox" />锁定（鼠标穿透）</label>
+          </div>
+        </div>
+      </details>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

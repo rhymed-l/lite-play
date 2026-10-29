@@ -1,0 +1,277 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #1c1e21;
+  --muted: #6b7280;
+  --accent: #1e88e5;
+  --accent-text: #ffffff;
+  --border: #d9dce1;
+  --current: #e3f0fc;
+  --error-bg: #fdecea;
+  --error-text: #8a1c14;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181c;
+    --panel: #1f2227;
+    --text: #e6e8eb;
+    --muted: #9aa1ac;
+    --accent: #4da3f0;
+    --accent-text: #0b1620;
+    --border: #343941;
+    --current: #1d3347;
+    --error-bg: #3a1b18;
+    --error-text: #ffb4ab;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 8px;
+  padding: 10px;
+}
+
+button,
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+button:hover,
+select:hover {
+  border-color: var(--accent);
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+li:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  min-width: 64px;
+}
+
+button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.row.grow > * {
+  flex: 1;
+}
+
+.error {
+  background: var(--error-bg);
+  color: var(--error-text);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.error[hidden] {
+  display: none;
+}
+
+#folder-select {
+  flex: 1;
+  min-width: 0;
+}
+
+#tracks {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+#tracks li {
+  padding: 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#tracks li:hover {
+  background: var(--bg);
+}
+
+#tracks li.current {
+  background: var(--current);
+  font-weight: 600;
+}
+
+#tracks li.unavailable {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+#tracks .empty {
+  color: var(--muted);
+  cursor: default;
+  text-align: center;
+  padding: 20px 10px;
+}
+
+.time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 96px;
+  text-align: right;
+}
+
+input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.muted {
+  color: var(--muted);
+  margin: 0;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tabs button[aria-selected="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.subtitle-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.subtitle-view[hidden],
+#tracks[hidden] {
+  display: none;
+}
+
+.subtitle-notice {
+  margin: 0;
+  padding: 20px 10px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.subtitle-notice[hidden] {
+  display: none;
+}
+
+.subtitle-notice button {
+  margin-top: 8px;
+}
+
+.cue-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.cue-list li {
+  padding: 5px 12px;
+  line-height: 1.55;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.cue-list li:hover {
+  background: var(--bg);
+}
+
+.cue-list li.active {
+  background: var(--current);
+  font-weight: 600;
+}
+
+.settings {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+.settings summary {
+  cursor: pointer;
+  padding: 3px 0;
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 0 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.settings-body [hidden] {
+  display: none;
+}
+
+progress {
+  flex: 1;
+  accent-color: var(--accent);
+}

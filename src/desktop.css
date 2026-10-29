@@ -1,0 +1,47 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  /* The window itself is transparent; nothing may paint a background over the desktop. */
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+
+#frame {
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--sub-fg, #ffffff);
+  font: var(--sub-size, 28px) / 1.2 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+}
+
+/* Unlocked: a faint outline so the bar can be found and dragged. It is only a hint, not a
+   background, and disappears when the bar is locked. */
+#frame.unlocked {
+  border-color: rgba(255, 255, 255, 0.35);
+  cursor: move;
+}
+
+/* One line, never wrapped. Text wider than the window is moved by script, in time with the
+   audio, so the part being spoken is always visible. */
+#line {
+  margin: 0;
+  white-space: nowrap;
+  will-change: transform;
+  /* An outline instead of a background keeps the text readable on any desktop. */
+  text-shadow:
+    -1px -1px 0 rgba(0, 0, 0, 0.9),
+    1px -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px 0 rgba(0, 0, 0, 0.9),
+    0 0 6px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}

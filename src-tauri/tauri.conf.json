@@ -1,0 +1,82 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "lite-play",
+  "version": "0.1.0",
+  "identifier": "com.liteplay.app",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "lite-play",
+        "width": 420,
+        "height": 640,
+        "minWidth": 420,
+        "minHeight": 640
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "mp3"
+        ],
+        "name": "MP3 Audio",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "m4a"
+        ],
+        "name": "M4A Audio",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "flac"
+        ],
+        "name": "FLAC Audio",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "ogg"
+        ],
+        "name": "Ogg Audio",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "wav"
+        ],
+        "name": "WAV Audio",
+        "role": "Viewer"
+      }
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  }
+}
