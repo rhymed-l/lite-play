@@ -140,9 +140,6 @@ These are real, not hypothetical:
 
 - **Buttons and tray menu stopped responding once** during a long session while the global hotkeys
   kept working. It did not happen again after a restart and I have not found the cause.
-- **The desktop subtitle flickers occasionally.** A change that removes one suspected cause
-  (re-asserting "always on top" in two steps) has been made; whether it is gone has not been
-  confirmed.
 - **Subtitle accuracy has not been measured.** It was compared by eye on a few sentences, with no
   reference text. Expect wrong characters, especially for names and rare words.
 - Whether the desktop subtitle always stays above a clicked taskbar has been checked on one
