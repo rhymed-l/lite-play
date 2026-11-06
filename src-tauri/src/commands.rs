@@ -45,8 +45,14 @@ pub fn set_volume(engine: State<EngineHandle>, volume: f32) {
 }
 
 #[tauri::command]
-pub fn set_memory_enabled(engine: State<EngineHandle>, enabled: bool) {
-    engine.send(Cmd::SetMemoryEnabled(enabled));
+pub fn set_folder_playback(
+    engine: State<EngineHandle>,
+    path: String,
+    settings: crate::playback_settings::FolderPlaybackSettings,
+) -> Result<(), String> {
+    settings.validate()?;
+    engine.send(Cmd::SetFolderPlayback(path, settings));
+    Ok(())
 }
 
 #[tauri::command]

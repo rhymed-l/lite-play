@@ -40,7 +40,33 @@
       <div class="row">
         <label for="volume">音量</label>
         <input id="volume" type="range" min="0" max="100" step="1" value="80" aria-label="音量" />
+        <label for="speed">倍速</label>
+        <select id="speed" aria-label="播放倍速（保音调）" disabled>
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option>
+          <option value="1.75">1.75×</option>
+          <option value="2">2×</option>
+        </select>
       </div>
+
+      <details class="settings" id="folder-playback">
+        <summary>当前文件夹播放设置</summary>
+        <div class="settings-body">
+          <div class="row skip-settings">
+            <label for="skip-intro">跳过片头</label>
+            <input id="skip-intro" type="number" min="0" max="4294967295" step="1" value="0" disabled />
+            <span>秒</span>
+            <label for="skip-outro">跳过片尾</label>
+            <input id="skip-outro" type="number" min="0" max="4294967295" step="1" value="0" disabled />
+            <span>秒</span>
+          </div>
+          <p class="muted">0 表示不跳过；倍速保音调，三项设置均按文件夹记忆。秒数按原音频时间计算，时长未知时不能提前跳过片尾。</p>
+          <p id="playback-error" class="error" role="alert" hidden></p>
+        </div>
+      </details>
 
       <div class="row">
         <select id="mode" aria-label="播放模式">
@@ -49,7 +75,6 @@
           <option value="Shuffle">随机播放</option>
         </select>
         <button id="direction" type="button" aria-pressed="false">倒序</button>
-        <label class="check"><input id="memory" type="checkbox" />记忆进度</label>
       </div>
 
       <details id="subtitle-settings" class="settings">

@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import "./style.css";
 import { initSubtitles } from "./subtitles";
+import { parseSkipSeconds, acceptSettingsSnapshot } from "./playback";
 import {
   addFolder,
   getSnapshot,
@@ -12,9 +13,10 @@ import {
   seekTo,
   selectFolder,
   setDirection,
-  setMemoryEnabled,
   setMode,
   setVolume,
+  setFolderPlayback,
+  type FolderPlaybackSettings,
   type Mode,
   type Snapshot,
 } from "./api";
@@ -37,7 +39,14 @@ const nextBtn = el<HTMLButtonElement>("next");
 const volume = el<HTMLInputElement>("volume");
 const modeSelect = el<HTMLSelectElement>("mode");
 const directionBtn = el<HTMLButtonElement>("direction");
-const memoryBox = el<HTMLInputElement>("memory");
+const speedSelect = el<HTMLSelectElement>("speed");
+const skipIntro = el<HTMLInputElement>("skip-intro");
+const skipOutro = el<HTMLInputElement>("skip-outro");
+const playbackError = el<HTMLParagraphElement>("playback-error");
+let playbackFolder: string | null = null;
+let pendingSettings: FolderPlaybackSettings | null = null;
+let switchingFolder = false;
+let desiredSettings: FolderPlaybackSettings = { speed: 1, skip_intro: 0, skip_outro: 0 };
 
 let latest: Snapshot | null = null;
 let seeking = false;
@@ -73,7 +82,7 @@ function renderFolders(s: Snapshot): void {
     folderSelect.disabled = true;
     return;
   }
-  folderSelect.disabled = false;
+  folderSelect.disabled = switchingFolder;
   if (s.folder === null) {
     const placeholder = document.createElement("option");
     placeholder.value = "";
@@ -155,16 +164,49 @@ function render(s: Snapshot): void {
   modeSelect.value = s.mode;
   directionBtn.setAttribute("aria-pressed", String(s.direction === "Reverse"));
   directionBtn.textContent = s.direction === "Reverse" ? "倒序" : "正序";
-  memoryBox.checked = s.memory_enabled;
+
+  const folderChanged = playbackFolder !== s.folder;
+  playbackFolder = s.folder;
+  if (folderChanged) playbackError.hidden = true;
+  if (acceptSettingsSnapshot(pendingSettings, s.playback_settings, folderChanged)) {
+    pendingSettings = null;
+    desiredSettings = { ...s.playback_settings };
+    if (folderChanged || document.activeElement !== speedSelect) speedSelect.value = String(desiredSettings.speed);
+    if (folderChanged || document.activeElement !== skipIntro) skipIntro.value = String(desiredSettings.skip_intro);
+    if (folderChanged || document.activeElement !== skipOutro) skipOutro.value = String(desiredSettings.skip_outro);
+  }
+  speedSelect.disabled = skipIntro.disabled = skipOutro.disabled = s.folder === null || switchingFolder;
+  folderSelect.disabled = switchingFolder || s.folders.length === 0;
+  addFolderBtn.disabled = switchingFolder;
 }
 
-addFolderBtn.addEventListener("click", async () => {
+async function switchPlaybackFolder(operation: () => Promise<unknown>): Promise<void> {
+  if (switchingFolder) return;
+  switchingFolder = true;
+  folderSelect.disabled = addFolderBtn.disabled = true;
+  speedSelect.disabled = skipIntro.disabled = skipOutro.disabled = true;
+  try {
+    await operation();
+    const snapshot = await getSnapshot();
+    switchingFolder = false;
+    if (snapshot) render(snapshot);
+    else if (latest) render(latest);
+  } catch (error: unknown) {
+    switchingFolder = false;
+    if (latest) render(latest);
+    playbackError.textContent = `无法切换文件夹：${String(error)}`;
+    playbackError.hidden = false;
+  }
+}
+
+addFolderBtn.addEventListener("click", () => void switchPlaybackFolder(async () => {
   const picked = await open({ directory: true, multiple: false });
   if (typeof picked === "string") await addFolder(picked);
-});
+}));
 
 folderSelect.addEventListener("change", () => {
-  if (folderSelect.value) void selectFolder(folderSelect.value);
+  const path = folderSelect.value;
+  if (path) void switchPlaybackFolder(() => selectFolder(path));
 });
 
 playBtn.addEventListener("click", () => void playPause());
@@ -193,7 +235,35 @@ directionBtn.addEventListener("click", () => {
   const reversed = latest?.direction === "Reverse";
   void setDirection(reversed ? "Forward" : "Reverse");
 });
-memoryBox.addEventListener("change", () => void setMemoryEnabled(memoryBox.checked));
+
+function submitPlayback(patch: Partial<FolderPlaybackSettings>): void {
+  const path = latest?.folder;
+  if (!path || switchingFolder) return;
+  desiredSettings = { ...desiredSettings, ...patch };
+  pendingSettings = { ...desiredSettings };
+  playbackError.hidden = true;
+  void setFolderPlayback(path, { ...desiredSettings }).catch((error: unknown) => {
+    if (latest?.folder !== path) return;
+    pendingSettings = null;
+    render(latest);
+    playbackError.textContent = `无法保存文件夹播放设置：${String(error)}`;
+    playbackError.hidden = false;
+  });
+}
+
+speedSelect.addEventListener("change", () => submitPlayback({ speed: Number(speedSelect.value) }));
+for (const [input, key] of [[skipIntro, "skip_intro"], [skipOutro, "skip_outro"]] as const) {
+  input.addEventListener("change", () => {
+    const seconds = parseSkipSeconds(input.value);
+    if (seconds === null) {
+      playbackError.textContent = "片头片尾秒数必须为非负整数";
+      playbackError.hidden = false;
+      input.value = String(desiredSettings[key]);
+      return;
+    }
+    submitPlayback({ [key]: seconds });
+  });
+}
 
 async function start(): Promise<void> {
   await onSnapshot(render);

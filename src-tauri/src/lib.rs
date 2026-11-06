@@ -7,6 +7,8 @@ mod memory;
 mod navigator;
 mod player;
 mod playlist;
+mod playback_settings;
+mod stretch;
 mod subtitle;
 mod subtitle_commands;
 mod subtitle_window;
@@ -79,7 +81,7 @@ pub fn run() {
             commands::set_mode,
             commands::set_direction,
             commands::set_volume,
-            commands::set_memory_enabled,
+            commands::set_folder_playback,
             commands::add_folder,
             commands::select_folder,
             commands::open_file,

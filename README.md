@@ -19,8 +19,13 @@ Built with [Tauri 2](https://tauri.app/) (Rust + a small TypeScript front end).
 - Folder as playlist: only the top level of the folder is scanned, sorted in natural order
   (`2.mp3` before `10.mp3`). The list updates when files are added or removed.
 - Formats: mp3, m4a (AAC and ALAC), flac, ogg, wav.
-- Remembers the position of every file, and the last file you played. Can be switched off; turning
-  it off never deletes what was remembered.
+- Remembers the position of every file, and the last file you played in each folder: switching
+  folders and coming back returns to that folder's own book. Progress memory is always on.
+- Per-folder playback settings: pitch-preserving speed (0.5×, 0.75×, 1×, 1.25×, 1.5×,
+  1.75×, 2×), plus seconds to skip at the start and end. Each folder remembers its own settings.
+  `0` disables a skip. Times remain original-audio
+  times at every speed; subtitles use that same timeline. Unknown duration disables early outro
+  skipping; settings leaving less than one second of audio are ignored for that track with a warning.
 - Play modes: in order, repeat one, shuffle (shuffle never reorders the list and does not repeat
   recent files). Forward or reverse order.
 - Closing the window only hides it; playback continues from the tray. Quit from the tray menu.
@@ -92,6 +97,8 @@ Requirements (Windows):
 
 - [Rust](https://rustup.rs/) (stable, MSVC toolchain) and the Visual Studio C++ build tools
 - [Node.js](https://nodejs.org/) 24 or newer and [pnpm](https://pnpm.io/)
+- LLVM / libclang for the `signalsmith-stretch` bindings (set `LIBCLANG_PATH` to LLVM's `bin`
+  directory if automatic discovery fails); no external converter is needed at runtime
 - The WebView2 runtime (already present on Windows 11)
 - Tauri's other [prerequisites](https://tauri.app/start/prerequisites/)
 
@@ -128,7 +135,7 @@ Everything lives in `%APPDATA%\com.liteplay.app\`:
 
 | File | Content |
 |---|---|
-| `memory.json` | folders, per-file positions, mode, volume |
+| `memory.json` | folders, per-file positions, each folder's last track, mode, volume, per-folder speed and intro/outro skips |
 | `subtitle-settings.json` | subtitle switches, font size, colours, speed level, window position |
 | `subtitle-addon\` | the downloaded recognizer, model and the list of subtitles lite-play wrote |
 
@@ -150,7 +157,10 @@ These are real, not hypothetical:
 
 ## Licence
 
-[MIT](LICENSE). The downloaded components have their own licences: sherpa-onnx is Apache-2.0 and
+[MIT](LICENSE). Pitch-preserving playback uses the MIT-licensed
+[Signalsmith Stretch Rust wrapper](https://github.com/colinmarc/signalsmith-stretch-rs)
+and its bundled Signalsmith audio libraries; preserve their licence notices when distributing.
+The downloaded components have their own licences: sherpa-onnx is Apache-2.0 and
 the SenseVoice project is MIT. The model package's own licence file only points to the
 [FunASR](https://github.com/modelscope/FunASR#license) licence; check it before redistributing the
 model.

@@ -26,7 +26,7 @@ pub enum Cmd {
     SetMode(Mode),
     SetDirection(Direction),
     SetVolume(f32),
-    SetMemoryEnabled(bool),
+    SetFolderPlayback(String, crate::playback_settings::FolderPlaybackSettings),
     AddFolder(PathBuf),
     SelectFolder(PathBuf),
     OpenFile(PathBuf),
@@ -98,6 +98,7 @@ impl AudioBackend for SilentBackend {
         false
     }
     fn set_volume(&mut self, _v: f32) {}
+    fn set_speed(&mut self, _speed: f32) {}
 }
 
 enum Backend {
@@ -146,6 +147,9 @@ impl AudioBackend for Backend {
     fn set_volume(&mut self, v: f32) {
         self.inner_mut().set_volume(v)
     }
+    fn set_speed(&mut self, speed: f32) {
+        self.inner_mut().set_speed(speed)
+    }
 }
 
 fn apply(c: &mut Controller<Backend>, cmd: Cmd) {
@@ -159,7 +163,7 @@ fn apply(c: &mut Controller<Backend>, cmd: Cmd) {
         Cmd::SetMode(m) => c.set_mode(m),
         Cmd::SetDirection(d) => c.set_direction(d),
         Cmd::SetVolume(v) => c.set_volume(v),
-        Cmd::SetMemoryEnabled(e) => c.set_memory_enabled(e),
+        Cmd::SetFolderPlayback(folder, settings) => c.set_folder_playback(&folder, settings),
         Cmd::AddFolder(p) => c.add_folder(&p),
         Cmd::SelectFolder(p) => c.select_folder(&p),
         Cmd::OpenFile(p) => c.open_file(&p),
@@ -275,8 +279,8 @@ fn run(app: AppHandle, memory_path: PathBuf, rx: mpsc::Receiver<Cmd>, tx: Sender
                 let snap = controller.snapshot();
                 push_subtitles(subtitles.update(&snap));
                 let shape = (snap.current, snap.playing);
-                let due = snap.playing
-                    && now_ms.saturating_sub(last_push_ms) >= PLAYING_PUSH_INTERVAL_MS;
+                let due =
+                    snap.playing && now_ms.saturating_sub(last_push_ms) >= PLAYING_PUSH_INTERVAL_MS;
                 if shape != last_shape || due {
                     last_shape = shape;
                     last_push_ms = now_ms;
