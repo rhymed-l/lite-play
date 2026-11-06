@@ -1,5 +1,6 @@
 use crate::memory::Memory;
 use crate::navigator::{Direction, Mode, Navigator};
+use crate::playback_settings::FolderPlaybackSettings;
 use crate::player::AudioBackend;
 use crate::playlist::scan_folder;
 use serde::Serialize;
@@ -33,7 +34,7 @@ pub struct Snapshot {
     pub mode: Mode,
     pub direction: Direction,
     pub volume: f32,
-    pub memory_enabled: bool,
+    pub playback_settings: FolderPlaybackSettings,
     pub error: Option<String>,
 }
 
@@ -94,8 +95,15 @@ impl<B: AudioBackend> Controller<B> {
             return;
         };
         self.folder = Some(dir);
+        self.backend.set_speed(self.folder_playback().speed);
         self.set_tracks(files);
-        let last = self.memory.last_track.clone();
+        // Each folder remembers its own last track; fall back to the folder's first track.
+        let folder_key = folder;
+        let last = self
+            .memory
+            .last_track_for(&folder_key)
+            .map(str::to_string)
+            .or_else(|| self.memory.last_track.clone());
         let idx = last
             .and_then(|p| self.tracks.iter().position(|t| t.path == p))
             .or_else(|| self.nav.first());
@@ -189,8 +197,24 @@ impl<B: AudioBackend> Controller<B> {
         self.stop_playback();
         self.folder = Some(dir.to_path_buf());
         self.memory.add_folder(&lossy(dir));
+        self.backend.set_speed(self.folder_playback().speed);
         self.set_tracks(files);
         self.error = None;
+        // Resume the folder's own last track, paused as on startup; fall back to the
+        // first track in the current direction. A load failure here is not an error:
+        // nothing has been played in this folder yet and the user has not pressed play.
+        let folder_key = lossy(dir);
+        let last = self
+            .memory
+            .last_track_for(&folder_key)
+            .map(str::to_string);
+        let idx = last
+            .and_then(|p| self.tracks.iter().position(|t| t.path == p))
+            .or_else(|| self.nav.first());
+        if let Some(idx) = idx {
+            self.nav.jump_to(idx);
+            self.load_track(idx);
+        }
         self.persist();
         true
     }
@@ -202,8 +226,9 @@ impl<B: AudioBackend> Controller<B> {
         self.duration = None;
     }
 
-    /// Loads the track paused, resuming at its remembered position when memory is on.
+    /// Loads the track paused, resuming at its remembered position.
     fn load_track(&mut self, idx: usize) -> bool {
+        self.error = None;
         let path = self.tracks[idx].path.clone();
         match self.backend.load(Path::new(&path)) {
             Err(_) => {
@@ -216,10 +241,16 @@ impl<B: AudioBackend> Controller<B> {
                 self.duration = duration;
                 self.loaded = true;
                 self.tracks[idx].unavailable = false;
-                if let Some(pos) = self.memory.position_for(&path) {
-                    let _ = self.backend.seek(pos);
+                let region = self.folder_playback().region(duration);
+                if !region.valid {
+                    self.error = Some("片头片尾设置使正文不足 1 秒，本曲目不跳过".into());
                 }
-                self.memory.last_track = Some(path);
+                let pos = region.resume(self.memory.position_for(&path));
+                if pos > 0.0 && self.backend.seek(pos).is_err() {
+                    self.error = Some("该文件不支持跳转，无法跳过片头或恢复进度".into());
+                }
+                let folder = self.folder.as_deref().map_or_else(String::new, lossy);
+                self.memory.note_last_track(&folder, &path);
                 true
             }
         }
@@ -255,7 +286,11 @@ impl<B: AudioBackend> Controller<B> {
         };
         let path = self.tracks[idx].path.clone();
         let pos = self.backend.position();
-        let near_end = self.duration.is_some_and(|d| pos >= d - NEAR_END_SECS);
+        let near_end = self
+            .folder_playback()
+            .region(self.duration)
+            .end
+            .is_some_and(|end| pos >= end - NEAR_END_SECS);
         if near_end || pos < 1.0 {
             self.memory.clear_position(&path);
         } else {
@@ -279,7 +314,6 @@ impl<B: AudioBackend> Controller<B> {
             if self.load_track(idx) {
                 self.backend.play();
                 self.playing = true;
-                self.error = None;
                 return true;
             }
             let step = if forward {
@@ -406,14 +440,54 @@ impl<B: AudioBackend> Controller<B> {
         self.backend.set_volume(volume);
     }
 
-    pub fn set_memory_enabled(&mut self, enabled: bool) {
-        self.memory.memory_enabled = enabled;
+    pub fn folder_playback(&self) -> FolderPlaybackSettings {
+        self.folder
+            .as_deref()
+            .and_then(|path| self.memory.folder_settings.get(&lossy(path)))
+            .copied()
+            .filter(|s| s.validate().is_ok())
+            .unwrap_or_default()
+    }
+
+    pub fn set_folder_playback(&mut self, folder: &str, settings: FolderPlaybackSettings) {
+        if self.folder.as_deref().map(lossy).as_deref() != Some(folder) {
+            self.error = Some("文件夹已切换，请重新设置当前文件夹".into());
+            return;
+        }
+        if let Err(error) = settings.validate() {
+            self.error = Some(error);
+            return;
+        }
+        self.memory.folder_settings.insert(folder.into(), settings);
+        self.backend.set_speed(settings.speed);
+        let region = settings.region(self.duration);
+        self.error = if self.loaded && !region.valid {
+            Some("片头片尾设置使正文不足 1 秒，本曲目不跳过".into())
+        } else {
+            None
+        };
+        // A loaded-but-paused track re-picks its start point (a new intro skip, say);
+        // a playing track is never interrupted by a settings change.
+        if self.loaded && !self.playing && region.valid {
+            if let Some(idx) = self.nav.current() {
+                let path = self.tracks[idx].path.clone();
+                let pos = region.resume(self.memory.position_for(&path));
+                if pos > 0.0 && self.backend.seek(pos).is_err() {
+                    self.error = Some("该文件不支持跳转，无法跳过片头或恢复进度".into());
+                }
+            }
+        }
         self.persist();
     }
 
     pub fn tick(&mut self, now_ms: u64) {
         self.last_tick_ms = now_ms;
-        if self.playing && self.loaded && self.backend.is_finished() {
+        let settings = self.folder_playback();
+        let region = settings.region(self.duration);
+        let reached_outro = settings.skip_outro > 0.0
+            && region.valid
+            && region.end.is_some_and(|end| self.backend.position() >= end);
+        if self.playing && self.loaded && (self.backend.is_finished() || reached_outro) {
             if !self.hold_seek_active(now_ms) {
                 self.on_finished();
             }
@@ -438,12 +512,16 @@ impl<B: AudioBackend> Controller<B> {
             tracks: self.tracks.clone(),
             current: self.nav.current(),
             playing: self.playing,
-            position: if self.loaded { self.backend.position() } else { 0.0 },
+            position: if self.loaded {
+                self.backend.position()
+            } else {
+                0.0
+            },
             duration: self.duration,
             mode: self.memory.mode,
             direction: self.memory.direction,
             volume: self.memory.volume,
-            memory_enabled: self.memory.memory_enabled,
+            playback_settings: self.folder_playback(),
             error: self.display_error(),
         }
     }
@@ -463,6 +541,7 @@ mod tests {
         duration: Option<f64>,
         playing: bool,
         seek_fails: bool,
+        speed: f32,
     }
 
     impl AudioBackend for FakeBackend {
@@ -501,6 +580,9 @@ mod tests {
             self.finished
         }
         fn set_volume(&mut self, _v: f32) {}
+        fn set_speed(&mut self, speed: f32) {
+            self.speed = speed;
+        }
     }
 
     struct Fixture {
@@ -543,6 +625,301 @@ mod tests {
     }
 
     #[test]
+    fn should_remember_settings_if_folders_are_switched_and_restarted() {
+        // Arrange
+        let mut f = fixture(&["a.mp3"]);
+        let other = tempfile::tempdir().unwrap();
+        let settings = crate::playback_settings::FolderPlaybackSettings {
+            speed: 1.5,
+            skip_intro: 10.0,
+            skip_outro: 5.0,
+        };
+        // Act
+        f.c.set_folder_playback(&lossy(f.music.path()), settings);
+        f.c.select_folder(other.path());
+        let other_settings = f.c.snapshot().playback_settings;
+        f.c.select_folder(f.music.path());
+        let mut restored = reload(&f);
+        restored.restore();
+        // Assert
+        assert_eq!(
+            other_settings,
+            crate::playback_settings::FolderPlaybackSettings::default()
+        );
+        assert_eq!(restored.snapshot().playback_settings, settings);
+        assert_eq!(restored.backend.speed, 1.5);
+    }
+
+    #[test]
+    fn should_start_after_intro_if_remembered_position_is_in_outro() {
+        // Arrange
+        let mut f = fixture_with(
+            FakeBackend {
+                duration: Some(100.0),
+                ..Default::default()
+            },
+            &["a.mp3"],
+        );
+        f.c.memory.positions.insert(path_of(&f, "a.mp3"), 95.0);
+        let settings = crate::playback_settings::FolderPlaybackSettings {
+            speed: 1.5,
+            skip_intro: 10.0,
+            skip_outro: 20.0,
+        };
+        f.c.set_folder_playback(&lossy(f.music.path()), settings);
+        // Act
+        f.c.play_pause();
+        // Assert
+        assert_eq!(f.c.snapshot().position, 10.0);
+    }
+
+    #[test]
+    fn should_advance_and_clear_progress_if_playing_reaches_outro() {
+        // Arrange
+        let mut f = fixture_with(
+            FakeBackend {
+                duration: Some(100.0),
+                ..Default::default()
+            },
+            &["a.mp3", "b.mp3"],
+        );
+        f.c.set_folder_playback(
+            &lossy(f.music.path()),
+            crate::playback_settings::FolderPlaybackSettings {
+                skip_outro: 20.0,
+                ..Default::default()
+            },
+        );
+        f.c.play_pause();
+        let path = path_of(&f, "a.mp3");
+        f.c.memory.positions.insert(path.clone(), 50.0);
+        f.c.backend.pos = 80.0;
+        // Act
+        f.c.tick(1000);
+        // Assert
+        assert_eq!(f.c.snapshot().current, Some(1));
+        assert!(!f.c.memory.positions.contains_key(&path));
+    }
+
+    #[test]
+    fn should_not_advance_if_paused_in_outro() {
+        // Arrange
+        let mut f = fixture_with(
+            FakeBackend {
+                duration: Some(100.0),
+                ..Default::default()
+            },
+            &["a.mp3", "b.mp3"],
+        );
+        f.c.set_folder_playback(
+            &lossy(f.music.path()),
+            crate::playback_settings::FolderPlaybackSettings {
+                skip_outro: 20.0,
+                ..Default::default()
+            },
+        );
+        f.c.play_pause();
+        f.c.play_pause();
+        f.c.backend.pos = 90.0;
+        // Act
+        f.c.tick(1000);
+        // Assert
+        assert_eq!(f.c.snapshot().current, Some(0));
+        assert!(!f.c.snapshot().playing);
+    }
+
+    #[test]
+    fn should_reject_settings_if_command_targets_old_folder() {
+        // Arrange
+        let mut f = fixture(&["a.mp3"]);
+        let settings = crate::playback_settings::FolderPlaybackSettings {
+            speed: 2.0,
+            ..Default::default()
+        };
+        // Act
+        f.c.set_folder_playback("not current", settings);
+        // Assert
+        assert_eq!(f.c.snapshot().playback_settings.speed, 1.0);
+        assert!(f.c.snapshot().error.is_some());
+    }
+
+    #[test]
+    fn should_repeat_body_if_single_mode_reaches_outro() {
+        // Arrange
+        let mut f = fixture_with(
+            FakeBackend {
+                duration: Some(100.0),
+                ..Default::default()
+            },
+            &["a.mp3"],
+        );
+        f.c.set_mode(Mode::Single);
+        f.c.set_folder_playback(
+            &lossy(f.music.path()),
+            crate::playback_settings::FolderPlaybackSettings {
+                skip_intro: 10.0,
+                skip_outro: 20.0,
+                ..Default::default()
+            },
+        );
+        f.c.play_pause();
+        f.c.backend.pos = 80.0;
+        // Act
+        f.c.tick(1000);
+        // Assert
+        assert!(f.c.snapshot().playing);
+        assert_eq!(f.c.snapshot().position, 10.0);
+    }
+
+    #[test]
+    fn should_stop_if_last_sequential_track_reaches_outro() {
+        // Arrange
+        let mut f = fixture_with(
+            FakeBackend {
+                duration: Some(100.0),
+                ..Default::default()
+            },
+            &["a.mp3"],
+        );
+        f.c.set_folder_playback(
+            &lossy(f.music.path()),
+            crate::playback_settings::FolderPlaybackSettings {
+                skip_outro: 20.0,
+                ..Default::default()
+            },
+        );
+        f.c.play_pause();
+        f.c.backend.pos = 80.0;
+        // Act
+        f.c.tick(1000);
+        // Assert
+        assert!(!f.c.snapshot().playing);
+        assert_eq!(f.c.snapshot().current, Some(0));
+    }
+
+    #[test]
+    fn should_report_skip_failure_if_intro_seek_refused() {
+        // Arrange
+        let mut f = fixture_with(
+            FakeBackend {
+                duration: Some(100.0),
+                seek_fails: true,
+                ..Default::default()
+            },
+            &["a.mp3"],
+        );
+        f.c.set_folder_playback(
+            &lossy(f.music.path()),
+            crate::playback_settings::FolderPlaybackSettings {
+                skip_intro: 10.0,
+                ..Default::default()
+            },
+        );
+        // Act
+        f.c.play_pause();
+        // Assert
+        assert!(f.c.snapshot().playing);
+        assert!(f.c.snapshot().error.unwrap().contains("跳转"));
+        assert!(!f.c.snapshot().tracks[0].unavailable);
+    }
+
+    #[test]
+    fn should_play_whole_file_and_warn_if_skips_leave_no_body() {
+        // Arrange
+        let mut f = fixture_with(
+            FakeBackend {
+                duration: Some(20.0),
+                ..Default::default()
+            },
+            &["a.mp3"],
+        );
+        f.c.set_folder_playback(
+            &lossy(f.music.path()),
+            crate::playback_settings::FolderPlaybackSettings {
+                skip_intro: 10.0,
+                skip_outro: 10.0,
+                ..Default::default()
+            },
+        );
+        // Act
+        f.c.play_pause();
+        // Assert
+        assert_eq!(f.c.snapshot().position, 0.0);
+        assert!(f.c.snapshot().error.unwrap().contains("不足"));
+    }
+
+    #[test]
+    fn should_keep_intro_and_wait_for_eof_if_duration_unknown() {
+        // Arrange
+        let mut f = fixture(&["a.mp3", "b.mp3"]);
+        f.c.set_folder_playback(
+            &lossy(f.music.path()),
+            FolderPlaybackSettings {
+                skip_intro: 10.0,
+                skip_outro: 20.0,
+                ..Default::default()
+            },
+        );
+        // Act
+        f.c.play_pause();
+        let initial_position = f.c.snapshot().position;
+        f.c.backend.pos = 1000.0;
+        f.c.tick(1000);
+        // Assert
+        assert_eq!(initial_position, 10.0);
+        assert_eq!(f.c.snapshot().current, Some(0));
+    }
+
+    #[test]
+    fn should_delay_outro_transition_if_hold_seek_protection_active() {
+        // Arrange
+        let mut f = fixture_with(
+            FakeBackend {
+                duration: Some(100.0),
+                ..Default::default()
+            },
+            &["a.mp3", "b.mp3"],
+        );
+        f.c.set_folder_playback(
+            &lossy(f.music.path()),
+            FolderPlaybackSettings {
+                skip_outro: 20.0,
+                ..Default::default()
+            },
+        );
+        f.c.play_pause();
+        f.c.backend.pos = 70.0;
+        f.c.seek_by(20.0);
+        // Act
+        f.c.tick(500);
+        let protected_current = f.c.snapshot().current;
+        f.c.tick(1200);
+        // Assert
+        assert_eq!(protected_current, Some(0));
+        assert_eq!(f.c.snapshot().current, Some(1));
+    }
+
+    #[test]
+    fn should_keep_settings_if_input_is_invalid() {
+        // Arrange
+        let mut f = fixture(&["a.mp3"]);
+        // Act
+        f.c.set_folder_playback(
+            &lossy(f.music.path()),
+            FolderPlaybackSettings {
+                speed: f32::NAN,
+                ..Default::default()
+            },
+        );
+        // Assert
+        assert_eq!(
+            f.c.snapshot().playback_settings,
+            FolderPlaybackSettings::default()
+        );
+        assert!(f.c.snapshot().error.is_some());
+    }
+
+    #[test]
     fn remembers_position_per_song_across_switching() {
         let mut f = fixture(&["a.mp3", "b.mp3", "c.mp3"]);
         f.c.play_pause();
@@ -558,25 +935,31 @@ mod tests {
     }
 
     #[test]
-    fn disabled_memory_starts_from_zero_keeps_old_records_and_restores_on_enable() {
+    fn switching_folders_resumes_each_folders_last_track_paused() {
         let mut f = fixture(&["a.mp3", "b.mp3"]);
-        let pa = path_of(&f, "a.mp3");
+        let other = tempfile::tempdir().unwrap();
+        for n in ["c.mp3", "d.mp3"] {
+            fs::write(other.path().join(n), b"x").unwrap();
+        }
         f.c.play_pause();
-        f.c.backend.pos = 100.0;
         f.c.next();
+        f.c.backend.pos = 42.0;
+        f.c.select_folder(other.path());
+        assert_eq!(f.c.snapshot().current, Some(0), "new folder starts at its first track");
 
-        f.c.set_memory_enabled(false);
-        f.c.backend.seeks.clear();
-        f.c.play_index(0);
-        assert!(f.c.backend.seeks.is_empty(), "no seek while memory is off");
-        f.c.backend.pos = 50.0;
-        f.c.next();
-        assert_eq!(f.c.memory.positions[&pa], 100.0);
+        f.c.play_index(1);
+        f.c.backend.pos = 7.0;
+        f.c.select_folder(f.music.path());
 
-        f.c.set_memory_enabled(true);
-        f.c.backend.seeks.clear();
-        f.c.play_index(0);
-        assert_eq!(f.c.backend.seeks.last().copied(), Some(100.0));
+        let s = f.c.snapshot();
+        assert_eq!(s.current, Some(1), "back to book A's own last track");
+        assert!(!s.playing, "switching folders pauses like a restart");
+        assert_eq!(s.position, 42.0);
+
+        f.c.select_folder(other.path());
+        let s = f.c.snapshot();
+        assert_eq!(s.current, Some(1), "back to book B's own last track");
+        assert_eq!(s.position, 7.0);
     }
 
     #[test]
@@ -705,7 +1088,11 @@ mod tests {
         let s = f.c.snapshot();
         assert_eq!(s.error.as_deref(), Some("没有可播放的歌曲"));
         assert!(!s.playing);
-        assert!(f.c.backend.loads.len() <= 2, "loads: {}", f.c.backend.loads.len());
+        assert!(
+            f.c.backend.loads.len() <= 3,
+            "loads: {}",
+            f.c.backend.loads.len()
+        );
     }
 
     #[test]
@@ -715,7 +1102,7 @@ mod tests {
         f.c.play_pause();
 
         assert_eq!(f.c.snapshot().error.as_deref(), Some("没有可播放的歌曲"));
-        assert!(f.c.backend.loads.len() <= 2);
+        assert!(f.c.backend.loads.len() <= 3);
     }
 
     #[test]
@@ -725,7 +1112,7 @@ mod tests {
         f.c.play_pause();
 
         assert_eq!(f.c.snapshot().error.as_deref(), Some("没有可播放的歌曲"));
-        assert!(f.c.backend.loads.len() <= 3);
+        assert!(f.c.backend.loads.len() <= 4);
     }
 
     #[test]
@@ -808,6 +1195,10 @@ mod tests {
     fn reverse_direction_starts_from_the_last_file() {
         let mut f = fixture(&["a.mp3", "b.mp3", "c.mp3"]);
         f.c.set_direction(Direction::Reverse);
+        // The fixture's initial load already remembers a.mp3 as this folder's last
+        // track; a folder with no history starts from the last file in reverse order.
+        f.c.memory.folder_last_track.clear();
+        f.c.select_folder(f.music.path());
 
         f.c.play_pause();
 
@@ -825,7 +1216,10 @@ mod tests {
 
         let saved = Memory::load(&f.store.path().join("memory.json"));
         assert_eq!(saved.mode, Mode::Shuffle);
-        assert_eq!(saved.folders, vec![f.music.path().to_string_lossy().into_owned()]);
+        assert_eq!(
+            saved.folders,
+            vec![f.music.path().to_string_lossy().into_owned()]
+        );
         assert_eq!(saved.last_track, Some(path_of(&f, "a.mp3")));
     }
 

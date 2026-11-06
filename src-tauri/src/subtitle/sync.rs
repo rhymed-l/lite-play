@@ -192,7 +192,7 @@ mod tests {
             mode: Mode::Sequential,
             direction: Direction::Forward,
             volume: 0.8,
-            memory_enabled: true,
+            playback_settings: Default::default(),
             error: None,
         }
     }

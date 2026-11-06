@@ -1,3 +1,4 @@
+use crate::stretch::{TempoControl, TempoSource};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::fs::File;
 use std::path::Path;
@@ -13,6 +14,8 @@ pub trait AudioBackend {
     fn position(&self) -> f64;
     fn is_finished(&self) -> bool;
     fn set_volume(&mut self, v: f32);
+    /// Sets pitch-preserving playback tempo. Backends without tempo support may ignore it.
+    fn set_speed(&mut self, _speed: f32) {}
 }
 
 /// Owns the output device, so it must live on the thread that created it.
@@ -20,6 +23,9 @@ pub struct RodioBackend {
     device: MixerDeviceSink,
     player: Option<Player>,
     volume: f32,
+    /// Shared with the audio thread: the atomic tempo the DSP loop reads, and the
+    /// original-timeline position it publishes from consumed output.
+    control: TempoControl,
 }
 
 impl RodioBackend {
@@ -29,6 +35,7 @@ impl RodioBackend {
             device,
             player: None,
             volume: 0.8,
+            control: TempoControl::new(1.0),
         })
     }
 }
@@ -40,10 +47,15 @@ impl AudioBackend for RodioBackend {
         let decoder = Decoder::try_from(file).map_err(|e| e.to_string())?;
         let duration = decoder.total_duration().map(|d| d.as_secs_f64());
 
+        // 1x bypasses the DSP, so the exact path stays untouched until a tempo is
+        // chosen; TempoSource switches itself in when the control speed changes.
+        let control = self.control.clone();
+        control.publish(0.0);
+        let source = TempoSource::new(decoder, control);
         let player = Player::connect_new(self.device.mixer());
         player.pause();
         player.set_volume(self.volume);
-        player.append(decoder);
+        player.append(source);
         self.player = Some(player);
         Ok(duration)
     }
@@ -74,9 +86,9 @@ impl AudioBackend for RodioBackend {
     }
 
     fn position(&self) -> f64 {
-        self.player
-            .as_ref()
-            .map_or(0.0, |p| p.get_pos().as_secs_f64())
+        // The DSP publishes the ORIGINAL-timeline position of consumed output;
+        // Player::get_pos would report stretched time whenever a tempo is active.
+        self.control.position()
     }
 
     fn is_finished(&self) -> bool {
@@ -88,6 +100,10 @@ impl AudioBackend for RodioBackend {
         if let Some(p) = &self.player {
             p.set_volume(self.volume);
         }
+    }
+
+    fn set_speed(&mut self, speed: f32) {
+        self.control.set_speed(speed);
     }
 }
 
@@ -171,6 +187,29 @@ mod tests {
         b.load(&fixture("tone.wav")).unwrap();
         b.play();
         std::thread::sleep(std::time::Duration::from_millis(1600));
+        assert!(b.is_finished());
+    }
+
+    #[test]
+    #[ignore = "needs an audio output device"]
+    fn tempo_changes_duration_but_position_stays_original() {
+        let mut b = RodioBackend::new().expect("audio device");
+        b.set_volume(0.0);
+        b.load(&fixture("tone.wav")).unwrap();
+        b.set_speed(2.0);
+        // A 2x tempo consumes the track in about half its original time, while
+        // the reported position keeps measuring the original timeline. Allow for
+        // the callback buffer: the device drains lazily, so wait well past the
+        // 2x-consumption point before expecting the track to be finished.
+        b.play();
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        let pos = b.position();
+        assert!((0.7..1.1).contains(&pos), "position {pos} should follow the original timeline");
+        // Half a 1-second tone at 2x is consumed in 0.5s, but the device's
+        // callback buffer drains lazily, so "not finished yet" cannot be
+        // asserted reliably at a fixed wall-clock point. The position above is
+        // the original-timeline proof; only the eventual end is checked here.
+        std::thread::sleep(std::time::Duration::from_millis(2500));
         assert!(b.is_finished());
     }
 }

@@ -11,6 +11,7 @@ import {
   type SubtitleSettings,
 } from "./api";
 import { colours, scrollOffset } from "./ticker";
+import { elapsedPosition } from "./playback";
 
 const frame = document.getElementById("frame") as HTMLDivElement;
 const line = document.getElementById("line") as HTMLParagraphElement;
@@ -19,6 +20,7 @@ let cues: Cue[] = [];
 let active: number | null = null;
 let position = 0;
 let playing = false;
+let speed = 1;
 let positionAt = performance.now();
 let raf = 0;
 
@@ -36,7 +38,7 @@ function applySettings(s: SubtitleSettings): void {
 
 /** Playback position now, estimated between the engine's updates (it reports every 0.5 s). */
 function now(): number {
-  return playing ? position + (performance.now() - positionAt) / 1000 : position;
+  return elapsedPosition(position, performance.now() - positionAt, playing, speed);
 }
 
 function render(): void {
@@ -57,9 +59,10 @@ function tick(): void {
   raf = requestAnimationFrame(tick);
 }
 
-function onPosition(p: number, isPlaying: boolean): void {
+function onPosition(p: number, isPlaying: boolean, playbackSpeed: number): void {
   position = p;
   playing = isPlaying;
+  speed = playbackSpeed;
   positionAt = performance.now();
 }
 
@@ -74,7 +77,7 @@ async function start(): Promise<void> {
     active = index;
     render();
   });
-  await onSnapshot((s) => onPosition(s.position, s.playing));
+  await onSnapshot((s) => onPosition(s.position, s.playing, s.playback_settings.speed));
 
   const status = await getSubtitleStatus();
   applySettings(status.settings);
@@ -82,7 +85,7 @@ async function start(): Promise<void> {
   cues = track.cues;
   active = index;
   const snap = await getSnapshot();
-  if (snap) onPosition(snap.position, snap.playing);
+  if (snap) onPosition(snap.position, snap.playing, snap.playback_settings.speed);
   render();
   if (!raf) raf = requestAnimationFrame(tick);
 }

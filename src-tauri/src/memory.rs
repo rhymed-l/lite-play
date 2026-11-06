@@ -9,34 +9,40 @@ use std::path::{Path, PathBuf};
 #[serde(default)]
 pub struct Memory {
     pub version: u32,
-    pub memory_enabled: bool,
     pub positions: BTreeMap<String, f64>,
     pub folders: Vec<String>,
     pub current_folder: Option<String>,
     pub last_track: Option<String>,
+    /// Last track played in each folder, so switching back resumes that folder's book.
+    pub folder_last_track: BTreeMap<String, String>,
     pub mode: Mode,
     pub direction: Direction,
     pub volume: f32,
+    pub folder_settings: BTreeMap<String, crate::playback_settings::FolderPlaybackSettings>,
 }
 
 impl Default for Memory {
     fn default() -> Self {
         Self {
             version: 1,
-            memory_enabled: true,
             positions: BTreeMap::new(),
             folders: Vec::new(),
             current_folder: None,
             last_track: None,
+            folder_last_track: BTreeMap::new(),
             mode: Mode::Sequential,
             direction: Direction::Forward,
             volume: 0.8,
+            folder_settings: BTreeMap::new(),
         }
     }
 }
 
 pub(crate) fn sibling_with_suffix(path: &Path, suffix: &str) -> PathBuf {
-    let mut name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    let mut name = path
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
     name.push(suffix);
     path.with_file_name(name)
 }
@@ -71,23 +77,17 @@ impl Memory {
         fs::rename(&tmp, path)
     }
 
+    /// Progress memory is always on: the user made it permanent and it is no longer a setting.
     pub fn position_for(&self, track: &str) -> Option<f64> {
-        if !self.memory_enabled {
-            return None;
-        }
         self.positions.get(track).copied()
     }
 
     pub fn record_position(&mut self, track: &str, secs: f64) {
-        if self.memory_enabled {
-            self.positions.insert(track.to_string(), secs);
-        }
+        self.positions.insert(track.to_string(), secs);
     }
 
     pub fn clear_position(&mut self, track: &str) {
-        if self.memory_enabled {
-            self.positions.remove(track);
-        }
+        self.positions.remove(track);
     }
 
     pub fn add_folder(&mut self, folder: &str) {
@@ -96,12 +96,72 @@ impl Memory {
         }
         self.current_folder = Some(folder.to_string());
     }
-}
 
+    /// Remembers the track each folder was last playing, so switching back resumes it.
+    pub fn note_last_track(&mut self, folder: &str, track: &str) {
+        self.folder_last_track
+            .insert(folder.to_string(), track.to_string());
+        self.last_track = Some(track.to_string());
+    }
+
+    pub fn last_track_for(&self, folder: &str) -> Option<&str> {
+        self.folder_last_track.get(folder).map(String::as_str)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn should_keep_folder_settings_if_old_json_has_a_memory_switch() {
+        // Arrange
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("memory.json");
+        let mut memory = Memory::default();
+        let settings = crate::playback_settings::FolderPlaybackSettings {
+            speed: 1.5,
+            skip_intro: 20.0,
+            skip_outro: 30.0,
+        };
+        memory.folder_settings.insert("book A".into(), settings);
+        memory
+            .folder_settings
+            .insert("book B".into(), Default::default());
+        // Act
+        memory.save(&path).unwrap();
+        let loaded = Memory::load(&path);
+        // Assert
+        assert_eq!(loaded.folder_settings["book A"], settings);
+        assert_eq!(loaded.folder_settings["book B"].speed, 1.0);
+    }
+
+    #[test]
+    fn should_remember_last_track_if_folder_is_switched_and_restored() {
+        // Arrange
+        let mut m = Memory::default();
+        m.add_folder(r"D:\书A");
+        m.add_folder(r"D:\书B");
+        // Act
+        m.note_last_track(r"D:\书B", r"D:\书B\05.mp3");
+        // Assert
+        assert_eq!(
+            m.last_track_for(r"D:\书B").map(str::to_string),
+            Some(r"D:\书B\05.mp3".into())
+        );
+        assert_eq!(m.last_track_for(r"D:\书A"), None);
+    }
+
+    #[test]
+    fn should_default_folder_settings_if_old_json_is_loaded() {
+        // Arrange
+        let old = r#"{"volume":0.5,"positions":{"a.mp3":42.0}}"#;
+        // Act
+        let loaded: Memory = serde_json::from_str(old).unwrap();
+        // Assert
+        assert!(loaded.folder_settings.is_empty());
+        assert_eq!(loaded.positions["a.mp3"], 42.0);
+    }
 
     #[test]
     fn roundtrip_keeps_chinese_and_spaced_paths() {
@@ -120,18 +180,12 @@ mod tests {
     }
 
     #[test]
-    fn disabled_memory_neither_reads_nor_writes_but_keeps_history() {
+    fn positions_are_always_recorded_and_cleared() {
         let mut m = Memory::default();
         m.record_position("a", 100.0);
-        m.memory_enabled = false;
-
-        assert_eq!(m.position_for("a"), None);
-        m.record_position("a", 5.0);
-        m.clear_position("a");
-        assert_eq!(m.positions["a"], 100.0);
-
-        m.memory_enabled = true;
         assert_eq!(m.position_for("a"), Some(100.0));
+        m.clear_position("a");
+        assert_eq!(m.position_for("a"), None);
     }
 
     #[test]
@@ -164,8 +218,8 @@ mod tests {
 
         let m = Memory::load(&path);
         assert_eq!(m.volume, 0.5);
-        assert!(m.memory_enabled);
         assert_eq!(m.mode, Mode::Sequential);
+        assert!(m.folder_last_track.is_empty());
     }
 
     #[test]
@@ -188,7 +242,10 @@ mod tests {
         m.add_folder("/music");
         m.add_folder("/podcasts");
         m.add_folder("/music");
-        assert_eq!(m.folders, vec!["/music".to_string(), "/podcasts".to_string()]);
+        assert_eq!(
+            m.folders,
+            vec!["/music".to_string(), "/podcasts".to_string()]
+        );
         assert_eq!(m.current_folder.as_deref(), Some("/music"));
     }
 

@@ -10,6 +10,12 @@ export interface TrackInfo {
   unavailable: boolean;
 }
 
+export interface FolderPlaybackSettings {
+  speed: number;
+  skip_intro: number;
+  skip_outro: number;
+}
+
 export interface Snapshot {
   folder: string | null;
   folders: string[];
@@ -21,7 +27,7 @@ export interface Snapshot {
   mode: Mode;
   direction: Direction;
   volume: number;
-  memory_enabled: boolean;
+  playback_settings: FolderPlaybackSettings;
   error: string | null;
 }
 
@@ -34,8 +40,8 @@ export const setMode = (mode: Mode) => invoke<void>("set_mode", { mode });
 export const setDirection = (direction: Direction) =>
   invoke<void>("set_direction", { direction });
 export const setVolume = (volume: number) => invoke<void>("set_volume", { volume });
-export const setMemoryEnabled = (enabled: boolean) =>
-  invoke<void>("set_memory_enabled", { enabled });
+export const setFolderPlayback = (path: string, settings: FolderPlaybackSettings) =>
+  invoke<void>("set_folder_playback", { path, settings });
 export const addFolder = (path: string) => invoke<void>("add_folder", { path });
 export const selectFolder = (path: string) => invoke<void>("select_folder", { path });
 export const getSnapshot = () => invoke<Snapshot | null>("get_snapshot");
